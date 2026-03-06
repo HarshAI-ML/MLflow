@@ -1,0 +1,116 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: #f4f6fb;
+  color: #10223b;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+h1 {
+  margin: 0;
+}
+
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #0055d4;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.summary,
+.forecast-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid #d4dcf0;
+  padding: 14px;
+}
+
+.wide {
+  grid-column: span 2;
+}
+
+.metrics,
+.history {
+  margin-top: 18px;
+  background: #ffffff;
+  border: 1px solid #d4dcf0;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.metric-list {
+  margin-top: 10px;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.positive {
+  color: #008f4c;
+  font-weight: 600;
+}
+
+.negative {
+  color: #c12f28;
+  font-weight: 600;
+}
+
+.error {
+  color: #c12f28;
+  font-weight: 600;
+  margin-top: 12px;
+}
+
+.mono {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #edf1f8;
+  padding: 8px 4px;
+}
