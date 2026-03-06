@@ -47,6 +47,8 @@ API endpoints:
 
 - `http://127.0.0.1:8000/api/health/`
 - `http://127.0.0.1:8000/api/forecast/`
+- `http://127.0.0.1:8000/api/forecast/?model=arima` (ARIMA output)
+- `http://127.0.0.1:8000/api/forecast/?model=both` (linear + ARIMA in one response)
 
 MLflow data is stored locally in `backend/mlruns/`.
 

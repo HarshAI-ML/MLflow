@@ -10,6 +10,7 @@ import requests
 import yfinance as yf
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from statsmodels.tsa.arima.model import ARIMA
 
 HORIZONS = {
     "1_day": 1,
@@ -20,6 +21,14 @@ HORIZONS = {
 TREND_WINDOW_DAYS = 365
 RECENT_RETURNS_DAYS = 90
 MAX_DAILY_LOG_MOVE = 0.0035
+ARIMA_CANDIDATE_ORDERS = [
+    (1, 1, 0),
+    (1, 1, 1),
+    (2, 1, 1),
+    (3, 1, 1),
+    (5, 1, 0),
+]
+SUPPORTED_MODELS = {"linear", "arima", "both"}
 
 
 @dataclass
@@ -30,6 +39,9 @@ class ForecastResult:
     metrics: dict
     mlflow_run_id: str
     history: list
+    model: str = "linear"
+    models: dict | None = None
+    mlflow_run_ids: dict | None = None
 
 
 def _tracking_uri() -> str:
@@ -92,7 +104,7 @@ def _fetch_yfinance_data(symbol: str, retries: int = 3, wait_seconds: int = 2):
     return pd.DataFrame()
 
 
-def run_btc_forecast(symbol: str = "BTC-USD") -> ForecastResult:
+def _load_price_data(symbol: str) -> pd.DataFrame:
     try:
         data = _fetch_yfinance_data(symbol=symbol)
     except Exception:
@@ -112,11 +124,18 @@ def run_btc_forecast(symbol: str = "BTC-USD") -> ForecastResult:
     else:
         data.reset_index().to_csv(cache_file, index=False)
 
-    closes = data["Close"].dropna().to_numpy()
-    if closes.size < 120:
-        raise ValueError("Not enough BTC history to build forecast.")
+    return data
 
-    y = closes.astype(float)
+
+def _build_history(data: pd.DataFrame) -> list[dict]:
+    history_df = data[["Close"]].tail(180).reset_index()
+    return [
+        {"date": row["Date"].strftime("%Y-%m-%d"), "close": float(row["Close"])}
+        for _, row in history_df.iterrows()
+    ]
+
+
+def _compute_linear_outputs(y: np.ndarray, latest_close: float) -> tuple[dict, dict, dict]:
     y_log = np.log(y)
     x = np.arange(len(y_log)).reshape(-1, 1)
 
@@ -134,9 +153,7 @@ def run_btc_forecast(symbol: str = "BTC-USD") -> ForecastResult:
         "r2": float(r2_score(y_test, test_pred)),
     }
 
-    latest_close = float(y[-1])
     latest_log_close = float(y_log[-1])
-
     trend_window = min(TREND_WINDOW_DAYS, len(y_log))
     x_trend = np.arange(trend_window).reshape(-1, 1)
     y_trend_log = y_log[-trend_window:]
@@ -170,47 +187,199 @@ def run_btc_forecast(symbol: str = "BTC-USD") -> ForecastResult:
             "predicted_change_pct": change_pct,
         }
 
-    history_df = data[["Close"]].tail(180).reset_index()
-    history = [
-        {"date": row["Date"].strftime("%Y-%m-%d"), "close": float(row["Close"])}
-        for _, row in history_df.iterrows()
-    ]
+    params = {
+        "model": "log_trend_conservative",
+        "train_test_split": "80_20",
+        "trend_window_days": trend_window,
+        "recent_returns_days": recent_window,
+        "max_daily_log_move": MAX_DAILY_LOG_MOVE,
+    }
+    metrics.update(
+        {
+            "raw_daily_log_trend": raw_daily_log_trend,
+            "median_recent_log_return": median_recent_log_return,
+            "blended_daily_log_trend": blended_daily_log_trend,
+            "conservative_daily_log_trend": conservative_daily_log_trend,
+        }
+    )
+    return forecasts, metrics, params
 
+
+def _fit_arima(series: np.ndarray, order: tuple[int, int, int]):
+    model = ARIMA(
+        series,
+        order=order,
+        enforce_stationarity=False,
+        enforce_invertibility=False,
+    )
+    return model.fit()
+
+
+def _select_arima_order(series: np.ndarray) -> tuple[tuple[int, int, int], float]:
+    best_order: tuple[int, int, int] | None = None
+    best_aic = np.inf
+
+    for order in ARIMA_CANDIDATE_ORDERS:
+        try:
+            fit_result = _fit_arima(series, order)
+            if np.isfinite(fit_result.aic) and fit_result.aic < best_aic:
+                best_aic = float(fit_result.aic)
+                best_order = order
+        except Exception:
+            continue
+
+    if best_order is None:
+        raise ValueError("ARIMA training failed for all candidate orders.")
+    return best_order, best_aic
+
+
+def _compute_arima_outputs(y: np.ndarray, latest_close: float) -> tuple[dict, dict, dict]:
+    split_idx = int(len(y) * 0.8)
+    split_idx = max(60, min(split_idx, len(y) - 5))
+    y_train, y_test = y[:split_idx], y[split_idx:]
+
+    selected_order, selected_order_aic = _select_arima_order(y_train)
+    train_model = _fit_arima(y_train, selected_order)
+    test_pred = train_model.forecast(steps=len(y_test))
+    metrics = {
+        "mae": float(mean_absolute_error(y_test, test_pred)),
+        "rmse": float(np.sqrt(mean_squared_error(y_test, test_pred))),
+        "r2": float(r2_score(y_test, test_pred)),
+        "train_aic": float(train_model.aic),
+        "selected_order_aic": selected_order_aic,
+    }
+
+    final_model = _fit_arima(y, selected_order)
+    max_days_ahead = max(HORIZONS.values())
+    future_pred = final_model.forecast(steps=max_days_ahead)
+
+    forecasts: dict[str, dict] = {}
+    for label, days_ahead in HORIZONS.items():
+        predicted = float(max(future_pred[days_ahead - 1], 1e-6))
+        change_pct = ((predicted - latest_close) / latest_close) * 100.0
+        forecasts[label] = {
+            "days_ahead": days_ahead,
+            "predicted_close": predicted,
+            "predicted_change_pct": change_pct,
+        }
+
+    params = {
+        "model": "arima",
+        "train_test_split": "80_20",
+        "arima_order": str(selected_order),
+        "candidate_orders": str(ARIMA_CANDIDATE_ORDERS),
+    }
+    return forecasts, metrics, params
+
+
+def _log_model_run(
+    symbol: str,
+    model_key: str,
+    latest_close: float,
+    forecasts: dict,
+    metrics: dict,
+    model_params: dict,
+) -> str:
     mlflow.set_tracking_uri(_tracking_uri())
     mlflow.set_experiment("btc_forecasting")
-    with mlflow.start_run(run_name="btc-log-trend-conservative-3y") as run:
-        mlflow.log_params(
-            {
-                "symbol": symbol,
-                "model": "log_trend_conservative",
-                "lookback_period": "3y",
-                "interval": "1d",
-                "train_test_split": "80_20",
-                "trend_window_days": trend_window,
-                "recent_returns_days": recent_window,
-                "max_daily_log_move": MAX_DAILY_LOG_MOVE,
-            }
-        )
+    with mlflow.start_run(run_name=f"btc-{model_key}-3y") as run:
+        params = {
+            "symbol": symbol,
+            "lookback_period": "3y",
+            "interval": "1d",
+        }
+        params.update(model_params)
+        mlflow.log_params(params)
+        mlflow.log_metric("latest_close", latest_close)
         for key, value in metrics.items():
             mlflow.log_metric(key, value)
-        mlflow.log_metric("latest_close", latest_close)
-        mlflow.log_metric("raw_daily_log_trend", raw_daily_log_trend)
-        mlflow.log_metric("median_recent_log_return", median_recent_log_return)
-        mlflow.log_metric("blended_daily_log_trend", blended_daily_log_trend)
-        mlflow.log_metric("conservative_daily_log_trend", conservative_daily_log_trend)
         for key, value in forecasts.items():
             mlflow.log_metric(f"forecast_{key}_close", value["predicted_close"])
             mlflow.log_metric(
                 f"forecast_{key}_change_pct", value["predicted_change_pct"]
             )
+        return run.info.run_id
 
-        run_id = run.info.run_id
+
+def run_btc_forecast(symbol: str = "BTC-USD", model: str = "linear") -> ForecastResult:
+    model = model.lower().strip()
+    if model not in SUPPORTED_MODELS:
+        raise ValueError(
+            f"Unsupported model '{model}'. Choose one of: {', '.join(sorted(SUPPORTED_MODELS))}."
+        )
+
+    data = _load_price_data(symbol)
+    closes = data["Close"].dropna().to_numpy()
+    if closes.size < 120:
+        raise ValueError("Not enough BTC history to build forecast.")
+
+    y = closes.astype(float)
+    latest_close = float(y[-1])
+    history = _build_history(data)
+
+    forecasts_linear = {}
+    metrics_linear = {}
+    run_id_linear = ""
+    if model in {"linear", "both"}:
+        forecasts_linear, metrics_linear, params_linear = _compute_linear_outputs(
+            y, latest_close
+        )
+        run_id_linear = _log_model_run(
+            symbol=symbol,
+            model_key="linear-log-trend-conservative",
+            latest_close=latest_close,
+            forecasts=forecasts_linear,
+            metrics=metrics_linear,
+            model_params=params_linear,
+        )
+        if model == "linear":
+            return ForecastResult(
+                symbol=symbol,
+                latest_close=latest_close,
+                forecasts=forecasts_linear,
+                metrics=metrics_linear,
+                mlflow_run_id=run_id_linear,
+                history=history,
+                model="linear",
+            )
+
+    forecasts_arima = {}
+    metrics_arima = {}
+    run_id_arima = ""
+    if model in {"arima", "both"}:
+        forecasts_arima, metrics_arima, params_arima = _compute_arima_outputs(
+            y, latest_close
+        )
+        run_id_arima = _log_model_run(
+            symbol=symbol,
+            model_key="arima",
+            latest_close=latest_close,
+            forecasts=forecasts_arima,
+            metrics=metrics_arima,
+            model_params=params_arima,
+        )
+        if model == "arima":
+            return ForecastResult(
+                symbol=symbol,
+                latest_close=latest_close,
+                forecasts=forecasts_arima,
+                metrics=metrics_arima,
+                mlflow_run_id=run_id_arima,
+                history=history,
+                model="arima",
+            )
 
     return ForecastResult(
         symbol=symbol,
         latest_close=latest_close,
-        forecasts=forecasts,
-        metrics=metrics,
-        mlflow_run_id=run_id,
+        forecasts=forecasts_linear,
+        metrics=metrics_linear,
+        mlflow_run_id=run_id_linear,
         history=history,
+        model="both",
+        models={
+            "linear": {"forecasts": forecasts_linear, "metrics": metrics_linear},
+            "arima": {"forecasts": forecasts_arima, "metrics": metrics_arima},
+        },
+        mlflow_run_ids={"linear": run_id_linear, "arima": run_id_arima},
     )
