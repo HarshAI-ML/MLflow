@@ -16,6 +16,13 @@ function formatPct(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+function formatMetric(value, digits = 4) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return Number(value).toFixed(digits);
+}
+
 export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -112,29 +119,24 @@ export default function App() {
             ))}
           </section>
 
-          <section className="metrics">
-            <h2>Model Metrics</h2>
-            <div className="metric-list">
-              <span>MAE: {data.metrics.mae.toFixed(2)}</span>
-              <span>RMSE: {data.metrics.rmse.toFixed(2)}</span>
-              <span>R2: {data.metrics.r2.toFixed(4)}</span>
-            </div>
-          </section>
-
-          <section className="history">
-            <h2>Recent BTC Close History (last 10 records)</h2>
+          <section className="runs">
+            <h2>Recent MLflow Runs (last 10)</h2>
             <table>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Close</th>
+                  <th>MLflow Run ID</th>
+                  <th>Model Type</th>
+                  <th>MSE</th>
+                  <th>R2</th>
                 </tr>
               </thead>
               <tbody>
-                {data.history.slice(-10).reverse().map((row) => (
-                  <tr key={row.date}>
-                    <td>{row.date}</td>
-                    <td>{formatUsd(row.close)}</td>
+                {(data.recent_runs || []).map((row) => (
+                  <tr key={row.mlflow_run_id}>
+                    <td className="mono">{row.mlflow_run_id}</td>
+                    <td>{row.model}</td>
+                    <td>{formatMetric(row.mse, 2)}</td>
+                    <td>{formatMetric(row.r2, 4)}</td>
                   </tr>
                 ))}
               </tbody>

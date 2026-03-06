@@ -1,7 +1,7 @@
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
-from .services import run_btc_forecast
+from .services import get_recent_mlflow_runs, run_btc_forecast
 
 
 @require_GET
@@ -27,6 +27,7 @@ def btc_forecast_view(request):
         "metrics": result.metrics,
         "mlflow_run_id": result.mlflow_run_id,
         "history": result.history,
+        "recent_runs": get_recent_mlflow_runs(limit=10),
     }
     if result.models is not None:
         payload["models"] = result.models

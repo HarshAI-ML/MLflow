@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
+from mlflow.entities import ViewType
+from mlflow.tracking import MlflowClient
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from statsmodels.tsa.arima.model import ARIMA
@@ -299,6 +301,47 @@ def _log_model_run(
                 f"forecast_{key}_change_pct", value["predicted_change_pct"]
             )
         return run.info.run_id
+
+
+def _normalize_model_label(model_value: str | None) -> str:
+    if not model_value:
+        return "unknown"
+    model_value = model_value.strip().lower()
+    if model_value == "arima":
+        return "arima"
+    if model_value in {"log_trend_conservative", "linear"}:
+        return "linear"
+    return model_value
+
+
+def get_recent_mlflow_runs(limit: int = 10) -> list[dict]:
+    mlflow.set_tracking_uri(_tracking_uri())
+    client = MlflowClient()
+    experiment = client.get_experiment_by_name("btc_forecasting")
+    if experiment is None:
+        return []
+
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string="",
+        run_view_type=ViewType.ACTIVE_ONLY,
+        max_results=limit,
+        order_by=["start_time DESC"],
+    )
+
+    recent_runs = []
+    for run in runs:
+        rmse = run.data.metrics.get("rmse")
+        mse = (float(rmse) ** 2) if rmse is not None else None
+        recent_runs.append(
+            {
+                "mlflow_run_id": run.info.run_id,
+                "model": _normalize_model_label(run.data.params.get("model")),
+                "mse": mse,
+                "r2": run.data.metrics.get("r2"),
+            }
+        )
+    return recent_runs
 
 
 def run_btc_forecast(symbol: str = "BTC-USD", model: str = "linear") -> ForecastResult:
