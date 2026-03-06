@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # BTC Analyser (Django + React + MLflow)
 
 This project forecasts BTC prices for:
@@ -77,3 +78,6 @@ If backend URL changes, set:
 ```powershell
 $env:VITE_API_BASE_URL="http://127.0.0.1:8001"
 ```
+=======
+# MLflow
+>>>>>>> f51ed3aa50e6da752166b2e7efc184ac4bc3c82f
