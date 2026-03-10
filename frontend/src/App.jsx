@@ -27,12 +27,13 @@ export default function App() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedModel, setSelectedModel] = useState("linear");
 
-  const fetchForecast = async () => {
+  const fetchForecast = async (model = selectedModel) => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(FORECAST_ENDPOINT);
+      const res = await fetch(`${FORECAST_ENDPOINT}?model=${encodeURIComponent(model)}`);
       if (!res.ok) {
         let message = `API request failed with status ${res.status}`;
         try {
@@ -53,8 +54,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchForecast();
-  }, []);
+    fetchForecast(selectedModel);
+  }, [selectedModel]);
 
   const forecastCards = useMemo(() => {
     if (!data?.forecasts) return [];
@@ -79,7 +80,19 @@ export default function App() {
           <h1>BTC Forecast Analyser</h1>
           <p>3-year daily BTC-USD data from yfinance with MLflow tracking.</p>
         </div>
-        <button onClick={fetchForecast} disabled={loading}>
+        <div className="controls">
+          <label htmlFor="model-select">Model</label>
+          <select
+            id="model-select"
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            disabled={loading}
+          >
+            <option value="linear">Linear</option>
+            <option value="arima">ARIMA</option>
+          </select>
+        </div>
+        <button onClick={() => fetchForecast(selectedModel)} disabled={loading}>
           {loading ? "Refreshing..." : "Refresh Forecast"}
         </button>
       </header>

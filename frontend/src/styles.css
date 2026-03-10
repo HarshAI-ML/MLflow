@@ -20,6 +20,7 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 h1 {
@@ -44,6 +45,24 @@ button {
 button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controls label {
+  font-weight: 600;
+}
+
+.controls select {
+  border: 1px solid #c4cee4;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #10223b;
 }
 
 .summary,
