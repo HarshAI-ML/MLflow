@@ -41,7 +41,7 @@ export default function App() {
           if (errJson?.error) {
             message = errJson.error;
           }
-        } catch (_ignored) {}
+        } catch (_ignored) { }
         throw new Error(message);
       }
       const json = await res.json();
